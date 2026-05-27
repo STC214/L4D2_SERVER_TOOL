@@ -511,8 +511,7 @@ func parseA2SInfo(b []byte, info *ServerInfo) error {
 		}
 	}
 	if app != appIDLeft4Dead2 {
-		info.Blocked = true
-		info.BlockReasons = append(info.BlockReasons, "非 L4D2 AppID")
+		return fmt.Errorf("非 L4D2 AppID: %d", app)
 	}
 	return nil
 }
@@ -542,50 +541,12 @@ func applyRules(info *ServerInfo, cfg Config) {
 		return
 	}
 	name := normalizeText(info.Host)
-	gameMap := normalizeText(info.Map)
-	tags := normalizeText(info.Keywords)
 	for _, kw := range cfg.NameKeywords {
-		if strings.Contains(name, normalizeText(kw)) {
+		normalizedKW := normalizeText(kw)
+		if normalizedKW != "" && strings.Contains(name, normalizedKW) {
 			info.Blocked = true
 			info.BlockReasons = append(info.BlockReasons, "名称:"+kw)
 		}
-	}
-	for _, kw := range cfg.MapKeywords {
-		if strings.Contains(gameMap, normalizeText(kw)) {
-			info.Blocked = true
-			info.BlockReasons = append(info.BlockReasons, "地图:"+kw)
-		}
-	}
-	for _, kw := range cfg.TagKeywords {
-		if strings.Contains(tags, normalizeText(kw)) {
-			info.Blocked = true
-			info.BlockReasons = append(info.BlockReasons, "标签:"+kw)
-		}
-	}
-	if cfg.HideEmpty && info.Players == 0 {
-		info.Blocked = true
-		info.BlockReasons = append(info.BlockReasons, "空服")
-	}
-	if cfg.HideFull && info.MaxPlayers > 0 && info.Players >= info.MaxPlayers {
-		info.Blocked = true
-		info.BlockReasons = append(info.BlockReasons, "满服")
-	}
-	if cfg.HidePassword && info.Password {
-		info.Blocked = true
-		info.BlockReasons = append(info.BlockReasons, "密码")
-	}
-	if cfg.MaxPingMS > 0 && info.PingMS > cfg.MaxPingMS {
-		info.Blocked = true
-		info.BlockReasons = append(info.BlockReasons, fmt.Sprintf("Ping>%d", cfg.MaxPingMS))
-	}
-	if cfg.MaxPlayers > 0 && info.MaxPlayers > cfg.MaxPlayers {
-		info.Blocked = true
-		info.BlockReasons = append(info.BlockReasons, fmt.Sprintf("人数上限>%d", cfg.MaxPlayers))
-	}
-	host, _, err := net.SplitHostPort(info.Address)
-	if err == nil && ipBlocked(host, cfg) {
-		info.Blocked = true
-		info.BlockReasons = append(info.BlockReasons, "IP规则")
 	}
 }
 

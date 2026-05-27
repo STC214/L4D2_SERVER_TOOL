@@ -704,9 +704,6 @@ func displayReasons(s ServerInfo) string {
 	if s.IPChanged && s.PreviousAddress != "" {
 		reasons = append(reasons, "IP变更:"+s.PreviousAddress)
 	}
-	if s.Keywords != "" {
-		reasons = append(reasons, s.Keywords)
-	}
 	return strings.Join(reasons, " ")
 }
 
@@ -859,9 +856,7 @@ func recalculateMatches() {
 		if app.all[i].Error != "" {
 			continue
 		}
-		if isCandidateWithoutA2S(app.all[i]) {
-			applyIPRulesOnly(&app.all[i], app.cfg)
-		} else {
+		if !isCandidateWithoutA2S(app.all[i]) {
 			applyRules(&app.all[i], app.cfg)
 		}
 		addBlockedIPFromServer(app.all[i])
@@ -1100,7 +1095,7 @@ func insertResultHeader() {
 func resultHeaderLines() []string {
 	return []string{
 		"+------+---------+---------+----------------------+--------------------------+--------------------------------------------+----------------------------------+",
-		"| 状态 | 延迟    | 人数    | 地图                 | 地址                     | 服务器                                     | 命中原因/标签                    |",
+		"| 状态 | 延迟    | 人数    | 地图                 | 地址                     | 服务器                                     | 命中原因                         |",
 		"+------+---------+---------+----------------------+--------------------------+--------------------------------------------+----------------------------------+",
 	}
 }

@@ -228,15 +228,13 @@ func observeInfoWorker(ctx context.Context, cfg Config, candidates <-chan string
 			info := queryServer(ctx, key, 1600*time.Millisecond)
 			if info.Error != "" {
 				info = ServerInfo{
-					Address:      key,
-					Host:         "候选服务器，暂未获取名称",
-					Players:      -1,
-					MaxPlayers:   -1,
-					PingMS:       0,
-					LastSeen:     time.Now(),
-					BlockReasons: []string{"观察到 L4D2 UDP 流量"},
+					Address:    key,
+					Host:       "候选服务器，暂未获取名称",
+					Players:    -1,
+					MaxPlayers: -1,
+					PingMS:     0,
+					LastSeen:   time.Now(),
 				}
-				applyIPRulesOnly(&info, cfg)
 			} else {
 				applyRules(&info, cfg)
 			}
