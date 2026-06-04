@@ -1553,10 +1553,6 @@ void* __fastcall HookRequestInternet(void* self, void*, unsigned int appid, void
     return HookRequestCommon(0, "internet", self, appid, filters, filter_count, response);
 }
 
-void* __fastcall HookRequestLAN(void* self, void*, unsigned int appid, void* filters, unsigned int filter_count, void* response) {
-    return HookRequestCommon(1, "lan", self, appid, filters, filter_count, response);
-}
-
 void* __fastcall HookRequestFriends(void* self, void*, unsigned int appid, void* filters, unsigned int filter_count, void* response) {
     return HookRequestCommon(2, "friends", self, appid, filters, filter_count, response);
 }
@@ -1605,7 +1601,6 @@ bool TryPatchSteamServerListInterface() {
     };
     const SlotPatch slots[] = {
         {0, reinterpret_cast<void*>(&HookRequestInternet), "RequestInternetServerList"},
-        {1, reinterpret_cast<void*>(&HookRequestLAN), "RequestLANServerList"},
         {2, reinterpret_cast<void*>(&HookRequestFriends), "RequestFriendsServerList"},
         {3, reinterpret_cast<void*>(&HookRequestFavorites), "RequestFavoritesServerList"},
         {4, reinterpret_cast<void*>(&HookRequestHistory), "RequestHistoryServerList"},
