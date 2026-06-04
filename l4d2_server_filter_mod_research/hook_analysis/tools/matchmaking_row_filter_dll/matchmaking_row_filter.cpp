@@ -1625,11 +1625,11 @@ bool TryPatchSteamServerListInterface() {
         }
     }
     if (vtable[7] != reinterpret_cast<void*>(&HookedGetServerDetails)) {
-        g_get_server_details_original = reinterpret_cast<GetServerDetailsFn>(vtable[7]);
-        if (g_get_server_details_original && WritePointerSafe(&vtable[7], reinterpret_cast<void*>(&HookedGetServerDetails))) {
-            patched++;
-            Logf("steam serverlist slot patched name=GetServerDetails slot=7 original=0x%p hook=0x%p\r\n",
-                 g_get_server_details_original, reinterpret_cast<void*>(&HookedGetServerDetails));
+        GetServerDetailsFn details = reinterpret_cast<GetServerDetailsFn>(vtable[7]);
+        if (details && details != g_get_server_details_original) {
+            g_get_server_details_original = details;
+            Logf("steam serverlist slot observed name=GetServerDetails slot=7 original=0x%p hook=disabled\r\n",
+                 g_get_server_details_original);
         }
     }
     static DWORD s_probe_logs = 0;

@@ -36,6 +36,9 @@ config.json
 scan_results.json
 blocked_records.json
 firewall_rules.json
+IP_ban.json
+matched_entries.json
+cache_backups/
 *.corrupt-*.bak
 *_report.json
 *_report.md
@@ -44,6 +47,9 @@ firewall_rules.json
 # Downloaded or extracted third-party runtime packages
 WinDivert.zip
 _windivert_extract/
+
+# Local snapshots and old bundled copies
+archive/
 
 # Mutable local filter configs. Seed defaults are kept under config_defaults/.
 l4d2_server_filter_mod_research/hook_analysis/tools/matchmaking_row_filter_dll/blocked_keywords.txt

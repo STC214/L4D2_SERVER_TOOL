@@ -25,6 +25,7 @@ const (
 	WS_VSCROLL          = 0x00200000
 	WS_HSCROLL          = 0x00100000
 	WS_EX_CLIENTEDGE    = 0x00000200
+	ES_NOHIDESEL        = 0x0100
 	ES_MULTILINE        = 0x0004
 	ES_AUTOVSCROLL      = 0x0040
 	ES_AUTOHSCROLL      = 0x0080
@@ -43,9 +44,11 @@ const (
 	WM_COMMAND        = 0x0111
 	WM_SETICON        = 0x0080
 	WM_SETFONT        = 0x0030
+	WM_KEYDOWN        = 0x0100
 	WM_TIMER          = 0x0113
 	WM_GETTEXT        = 0x000D
 	WM_GETTEXTLENGTH  = 0x000E
+	EM_SETSEL         = 0x00B1
 	WM_CTLCOLOREDIT   = 0x0133
 	WM_CTLCOLORSTATIC = 0x0138
 	WM_CTLCOLORBTN    = 0x0135
@@ -55,6 +58,8 @@ const (
 	ICON_BIG       = 1
 	IMAGE_ICON     = 1
 	LR_DEFAULTSIZE = 0x00000040
+	VK_CONTROL     = 0x11
+	VK_A           = 0x41
 
 	ID_RESTORE = 1001
 	ID_SAVE    = 1002
@@ -94,6 +99,10 @@ var (
 	procPostMessage      = user32.NewProc("PostMessageW")
 	procPostQuitMessage  = user32.NewProc("PostQuitMessage")
 	procSetWindowText    = user32.NewProc("SetWindowTextW")
+	procGetFocus         = user32.NewProc("GetFocus")
+	procGetKeyState      = user32.NewProc("GetKeyState")
+	procSetWindowLongPtr = user32.NewProc("SetWindowLongPtrW")
+	procCallWindowProc   = user32.NewProc("CallWindowProcW")
 	procSetTimer         = user32.NewProc("SetTimer")
 	procKillTimer        = user32.NewProc("KillTimer")
 	procGetClientRect    = user32.NewProc("GetClientRect")
@@ -193,6 +202,8 @@ type appState struct {
 
 var app appState
 var uiTheme theme
+var oldLogEditProc uintptr
+var logEditCallback uintptr
 
 func main() {
 	runtime.LockOSThread()
@@ -301,6 +312,12 @@ func wndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 	case WM_COMMAND:
 		handleCommand(int(wparam & 0xffff))
 		return 0
+	case WM_KEYDOWN:
+		if wparam == VK_A && isControlDown() && getFocus() == app.logEdit {
+			procSendMessage.Call(app.logEdit, EM_SETSEL, 0, ^uintptr(0))
+			return 0
+		}
+		return 0
 	case WM_ERASEBKGND:
 		fillBackground(hwnd, wparam)
 		return 1
@@ -345,7 +362,8 @@ func createControls(hwnd uintptr) {
 	app.autoEdit = edit(hwnd, "", 292, 352, 250, 195, false)
 
 	app.statsText = label(hwnd, "规则统计：-", 596, 118, 520, 60)
-	app.logEdit = edit(hwnd, "", 596, 354, 520, 190, true)
+	app.logEdit = logEdit(hwnd, "", 596, 354, 520, 190)
+	subclassLogEdit(app.logEdit)
 
 	app.restoreBtn = button(hwnd, "恢复默认", 42, 626, 112, 32, ID_RESTORE)
 	app.saveBtn = button(hwnd, "保存配置", 166, 626, 112, 32, ID_SAVE)
@@ -462,7 +480,7 @@ func refreshLogTail() {
 	if err != nil {
 		text = "日志不可用：" + err.Error()
 	}
-	setText(app.logEdit, text)
+	setText(app.logEdit, newestLinesFirst(text))
 	updateStats()
 }
 
@@ -542,6 +560,9 @@ func queueLog(line string) {
 func drainEventsToUI() {
 	app.mu.Lock()
 	lines := append([]string(nil), app.logLines...)
+	if len(lines) > 0 {
+		app.logLines = nil
+	}
 	busy := app.busy
 	loadConfigs := app.pendingLoadConfigs
 	refreshLog := app.pendingRefreshLog
@@ -555,10 +576,7 @@ func drainEventsToUI() {
 	}
 	setBusy(busy)
 	if len(lines) > 0 {
-		current := getText(app.logEdit)
-		if !strings.Contains(current, "matchmaking_row_filter loaded") {
-			setText(app.logEdit, strings.Join(lines, "\r\n"))
-		}
+		setText(app.logEdit, strings.Join(reverseStrings(lines), "\r\n"))
 	}
 	if loadConfigs {
 		loadConfigsToUI()
@@ -686,6 +704,19 @@ func normalizeNewlines(text string) string {
 	return text
 }
 
+func newestLinesFirst(text string) string {
+	lines := strings.Split(strings.TrimRight(normalizeNewlines(text), "\n"), "\n")
+	return strings.Join(reverseStrings(lines), "\r\n")
+}
+
+func reverseStrings(in []string) []string {
+	out := make([]string, 0, len(in))
+	for i := len(in) - 1; i >= 0; i-- {
+		out = append(out, in[i])
+	}
+	return out
+}
+
 func dllDir() string {
 	exe, err := os.Executable()
 	if err != nil {
@@ -706,7 +737,27 @@ func dllDir() string {
 }
 
 func openPath(path string) {
-	procShellExecute.Call(0, uintptr(unsafe.Pointer(utf16Ptr("open"))), uintptr(unsafe.Pointer(utf16Ptr(path))), 0, 0, SW_SHOWNORMAL)
+	if strings.EqualFold(filepath.Ext(path), ".log") {
+		if _, err := os.Stat(path); err != nil {
+			_ = os.WriteFile(path, []byte{}, 0644)
+		}
+		ret, _, _ := procShellExecute.Call(0, uintptr(unsafe.Pointer(utf16Ptr("open"))), uintptr(unsafe.Pointer(utf16Ptr("notepad.exe"))), uintptr(unsafe.Pointer(utf16Ptr(path))), 0, SW_SHOWNORMAL)
+		if ret <= 32 {
+			showError("打开日志失败", fmt.Errorf("ShellExecuteW failed: %d", ret))
+		}
+		return
+	}
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		ret, _, _ := procShellExecute.Call(0, uintptr(unsafe.Pointer(utf16Ptr("open"))), uintptr(unsafe.Pointer(utf16Ptr("explorer.exe"))), uintptr(unsafe.Pointer(utf16Ptr(path))), 0, SW_SHOWNORMAL)
+		if ret <= 32 {
+			showError("打开目录失败", fmt.Errorf("ShellExecuteW failed: %d", ret))
+		}
+		return
+	}
+	ret, _, _ := procShellExecute.Call(0, uintptr(unsafe.Pointer(utf16Ptr("open"))), uintptr(unsafe.Pointer(utf16Ptr(path))), 0, 0, SW_SHOWNORMAL)
+	if ret <= 32 {
+		showError("打开失败", fmt.Errorf("ShellExecuteW failed: %d", ret))
+	}
 }
 
 func createFont(name string, height int32, weight int32) uintptr {
@@ -738,9 +789,36 @@ func edit(hwnd uintptr, text string, x, y, w, h int32, readonly bool) uintptr {
 	return createChild(WS_EX_CLIENTEDGE, "EDIT", text, uint32(style), x, y, w, h, hwnd, 0)
 }
 
+func logEdit(hwnd uintptr, text string, x, y, w, h int32) uintptr {
+	style := WS_BORDER | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_NOHIDESEL | WS_VSCROLL
+	return createChild(WS_EX_CLIENTEDGE, "EDIT", text, uint32(style), x, y, w, h, hwnd, 0)
+}
+
 func singleLineEdit(hwnd uintptr, text string, x, y, w, h int32) uintptr {
 	style := WS_BORDER | WS_TABSTOP | ES_AUTOHSCROLL
 	return createChild(WS_EX_CLIENTEDGE, "EDIT", text, uint32(style), x, y, w, h, hwnd, 0)
+}
+
+func subclassLogEdit(hwnd uintptr) {
+	if hwnd == 0 || oldLogEditProc != 0 {
+		return
+	}
+	logEditCallback = syscall.NewCallback(logEditProc)
+	ret, _, _ := procSetWindowLongPtr.Call(hwnd, ^uintptr(3), logEditCallback)
+	oldLogEditProc = ret
+}
+
+func logEditProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
+	if msg == WM_KEYDOWN && wparam == VK_A && isControlDown() {
+		procSendMessage.Call(hwnd, EM_SETSEL, 0, ^uintptr(0))
+		return 0
+	}
+	if oldLogEditProc != 0 {
+		ret, _, _ := procCallWindowProc.Call(oldLogEditProc, hwnd, uintptr(msg), wparam, lparam)
+		return ret
+	}
+	ret, _, _ := procDefWindowProc.Call(hwnd, uintptr(msg), wparam, lparam)
+	return ret
 }
 
 func createChild(exStyle uint32, class, text string, style uint32, x, y, w, h int32, parent, id uintptr) uintptr {
@@ -832,6 +910,16 @@ func getText(hwnd uintptr) string {
 	buf := make([]uint16, n+1)
 	procSendMessage.Call(hwnd, WM_GETTEXT, n+1, uintptr(unsafe.Pointer(&buf[0])))
 	return syscall.UTF16ToString(buf)
+}
+
+func getFocus() uintptr {
+	ret, _, _ := procGetFocus.Call()
+	return ret
+}
+
+func isControlDown() bool {
+	ret, _, _ := procGetKeyState.Call(VK_CONTROL)
+	return int16(ret&0xffff) < 0
 }
 
 func enable(hwnd uintptr, ok bool) {
