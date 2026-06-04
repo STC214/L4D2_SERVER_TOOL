@@ -1,0 +1,24 @@
+﻿{
+    "ver":"6.0",
+    "tag":"ipblacklist",
+    "data":[
+        {
+            "id":1,
+            "tmp_field_sel":true,
+            "raddr":"1.4.5.6",
+            "memo":""
+        },
+        {
+            "id":3,
+            "tmp_field_sel":true,
+            "raddr":"134.134.123.123",
+            "memo":""
+        },
+        {
+            "id":2,
+            "tmp_field_sel":true,
+            "raddr":"99.99.99.99",
+            "memo":""
+        }
+    ]
+}

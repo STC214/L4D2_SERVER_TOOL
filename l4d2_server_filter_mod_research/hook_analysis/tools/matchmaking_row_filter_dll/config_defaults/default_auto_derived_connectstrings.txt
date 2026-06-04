@@ -1,0 +1,5 @@
+# Default auto-derived host seed for matchmaking_row_filter.dll.
+# Copy to ..\auto_derived_connectstrings.txt to restore defaults.
+
+61.147.247.31
+8.152.6.214

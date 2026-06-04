@@ -1,0 +1,7 @@
+# Default permanent connect-string seed for matchmaking_row_filter.dll.
+# Copy to ..\blocked_connectstrings.txt to restore defaults.
+
+183.216.53.181
+118.25.230.120:28888
+118.25.230.120:33333
+110.42.9.24

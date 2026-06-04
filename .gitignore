@@ -7,43 +7,58 @@
 *.obj
 *.pdb
 *.ilk
-dist/
-build/
+*.lib
+*.exp
+*.test
+coverage.out
+*.coverprofile
+
+# Portable and release bundles
+portable_releases/
+L4D2_Row_Filter_Portable/
 release/
 release_*/
-
-# Portable/runtime bundles
 release_portable/
-L4D2ServerTool.exe
+*.zip
 
-# Downloaded/extracted third-party runtime packages
-WinDivert.zip
-_windivert_extract/
-
-# Runtime state and logs
-config.json
-startup.log
+# Runtime logs, state, and generated reports
 *.log
+*.dmp
+*.dump
+*.pcap
+*.pcapng
+*.etl
+*.tmp
+*.bak
+*.old
+startup.log
+config.json
 scan_results.json
 blocked_records.json
 firewall_rules.json
+*.corrupt-*.bak
+*_report.json
+*_report.md
+*.last_report_success
 
-# Local/corrupt backups generated while recovering user data
-*.bak
-*.tmp
-*.old
-config.corrupt-*.bak
-scan_results.corrupt-*.bak
+# Downloaded or extracted third-party runtime packages
+WinDivert.zip
+_windivert_extract/
 
-# Local editor and OS metadata
+# Mutable local filter configs. Seed defaults are kept under config_defaults/.
+l4d2_server_filter_mod_research/hook_analysis/tools/matchmaking_row_filter_dll/blocked_keywords.txt
+l4d2_server_filter_mod_research/hook_analysis/tools/matchmaking_row_filter_dll/blocked_connectstrings.txt
+l4d2_server_filter_mod_research/hook_analysis/tools/matchmaking_row_filter_dll/learned_connectstrings.txt
+l4d2_server_filter_mod_research/hook_analysis/tools/matchmaking_row_filter_dll/auto_derived_connectstrings.txt
+
+# Generated icon assets
+l4d2_server_filter_mod_research/hook_analysis/tools/row_filter_manager_gui/assets/app_icon.ico
+l4d2_server_filter_mod_research/hook_analysis/tools/row_filter_manager_gui/assets/app_icon.png
+
+# Editor and OS noise
 .vscode/
 .idea/
 *.swp
 *.swo
 Thumbs.db
 Desktop.ini
-
-# Go test/cache artifacts
-*.test
-coverage.out
-*.coverprofile

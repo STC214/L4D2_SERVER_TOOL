@@ -193,7 +193,7 @@ func blockedIPsFrom(infos []ServerInfo) []string {
 			continue
 		}
 		host, _, err := net.SplitHostPort(info.Address)
-		if err == nil {
+		if err == nil && isUsableServerAddress(info.Address) {
 			seen[host] = true
 		}
 	}
@@ -540,14 +540,49 @@ func applyRules(info *ServerInfo, cfg Config) {
 	if info.Error != "" {
 		return
 	}
+	if !isUsableServerAddress(info.Address) {
+		return
+	}
+	if isUnknownServer(info) {
+		info.Blocked = true
+		info.BlockReasons = appendUniqueReason(info.BlockReasons, "未知服务器")
+		return
+	}
 	name := normalizeText(info.Host)
 	for _, kw := range cfg.NameKeywords {
 		normalizedKW := normalizeText(kw)
 		if normalizedKW != "" && strings.Contains(name, normalizedKW) {
 			info.Blocked = true
-			info.BlockReasons = append(info.BlockReasons, "名称:"+kw)
+			info.BlockReasons = appendUniqueReason(info.BlockReasons, "名称:"+kw)
 		}
 	}
+}
+
+func isUnknownServer(info *ServerInfo) bool {
+	if info == nil {
+		return false
+	}
+	name := normalizeText(info.Host)
+	defaultName := name == "" ||
+		strings.Contains(name, "候选服务器") ||
+		strings.Contains(name, "暂未获取名称") ||
+		name == "left 4 dead 2" ||
+		name == "l4d2" ||
+		name == "srcds"
+	return defaultName && strings.TrimSpace(info.Map) == "" && info.PingMS <= 0 && (info.Players < 0 || info.MaxPlayers < 0)
+}
+
+func appendUniqueReason(reasons []string, reason string) []string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return reasons
+	}
+	for _, existing := range reasons {
+		if existing == reason {
+			return reasons
+		}
+	}
+	return append(reasons, reason)
 }
 
 func applyIPRulesOnly(info *ServerInfo, cfg Config) {
@@ -566,6 +601,9 @@ func normalizeText(s string) string {
 }
 
 func ipBlocked(host string, cfg Config) bool {
+	if !isUsableServerIPv4(host) {
+		return false
+	}
 	for _, exact := range cfg.IPExact {
 		if strings.TrimSpace(exact) == host {
 			return true
@@ -582,4 +620,40 @@ func ipBlocked(host string, cfg Config) bool {
 		}
 	}
 	return false
+}
+
+func isUsableServerAddress(address string) bool {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || len(port) != 5 {
+		return false
+	}
+	return isUsableServerIPv4(host)
+}
+
+func isUsableServerIPv4(host string) bool {
+	ip := net.ParseIP(strings.TrimSpace(host))
+	if ip == nil {
+		return false
+	}
+	v4 := ip.To4()
+	if v4 == nil {
+		return false
+	}
+	if v4[0] == 0 || v4[0] >= 224 {
+		return false
+	}
+	if v4[3] == 0 || (v4[2] == 0 && v4[3] == 0) || (v4[1] == 0 && v4[2] == 0 && v4[3] == 0) {
+		return false
+	}
+	allMaskOctets := true
+	has255 := false
+	for _, b := range v4 {
+		if b != 0 && b != 255 {
+			allMaskOctets = false
+		}
+		if b == 255 {
+			has255 = true
+		}
+	}
+	return !(allMaskOctets && has255)
 }

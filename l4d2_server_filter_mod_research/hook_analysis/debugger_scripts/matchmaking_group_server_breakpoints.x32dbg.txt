@@ -1,0 +1,34 @@
+// x32dbg script: L4D2 matchmaking.dll group-server scout breakpoints
+//
+// Usage:
+// 1. Start L4D2 and wait until the main menu is loaded.
+// 2. Attach x32dbg to left4dead2.exe.
+// 3. Make sure matchmaking.dll is loaded.
+// 4. Run these commands from the x32dbg command bar or script window.
+//
+// Notes:
+// - These are runtime expressions: matchmaking.dll + RVA.
+// - They do not patch game memory beyond normal debugger breakpoints.
+// - After a breakpoint hits, inspect ECX and stack args for KeyValues-like
+//   pointers containing GameDetailsServer, Server/name, Server/adrlocal,
+//   Server/adronline, Members/numSlots, Members/numPlayers.
+
+// Group server refresh request entry.
+bp matchmaking.dll+211E0
+
+// Server manager waiting for game details.
+bp matchmaking.dll+21570
+
+// Strong candidate: consumes/parses GameDetailsServer / ConnectServerDetailsRequest.
+bp matchmaking.dll+21B80
+
+// Strong candidate: extracts visible fields such as Server/name and addresses.
+bp matchmaking.dll+22750
+
+// Random matchmaking / dedicated server accept-reject path.
+bp matchmaking.dll+2D9D0
+
+// Refresh lifecycle markers.
+bp matchmaking.dll+219E0
+bp matchmaking.dll+21A70
+

@@ -1,0 +1,9 @@
+# Default keyword seed for matchmaking_row_filter.dll.
+# Copy to ..\blocked_keywords.txt to restore defaults.
+
+rpg
+RPG
+星缘
+破晓
+杀戮
+神域

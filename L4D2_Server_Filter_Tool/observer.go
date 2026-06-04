@@ -19,25 +19,34 @@ var procWinDivertHelperFormatIPv4Address = syscall.NewLazyDLL("WinDivert.dll").N
 var observeRawLogCount int
 
 func observeL4D2Flows(ctx context.Context, cfg Config, progress chan<- ScanProgress) {
-	defer close(progress)
 	observeRawLogCount = 0
+	observeCtx, stopObserveWorkers := context.WithCancel(ctx)
+	workerDone := make(chan struct{})
+	defer func() {
+		stopObserveWorkers()
+		<-workerDone
+		close(progress)
+	}()
 	pid, ok := findProcessID("left4dead2.exe")
 	if !ok {
+		close(workerDone)
 		progress <- ScanProgress{Phase: "observe", Message: "未找到 left4dead2.exe 进程。请先启动求生之路2。", Finished: true}
 		return
 	}
 
-	flowFilter := fmt.Sprintf("udp and processId == %d", pid)
+	flowFilter := fmt.Sprintf("processId == %d", pid)
 	flowHandle, err := windivert.Open(flowFilter, windivert.LayerFlow, 0, windivert.FlagSniff|windivert.FlagRecvOnly)
 	if err != nil {
+		close(workerDone)
 		progress <- ScanProgress{Phase: "observe", Message: "WinDivert 启动失败。请确认程序已用管理员权限启动，并且 WinDivert.dll/WinDivert64.sys 与 exe 在同一目录。错误：" + err.Error(), Finished: true}
 		return
 	}
 	defer flowHandle.Close()
 	_ = flowHandle.SetParam(windivert.QueueLength, 2048)
 
-	packetHandle, err := windivert.Open("udp", windivert.LayerNetwork, 0, windivert.FlagSniff|windivert.FlagRecvOnly)
+	packetHandle, err := windivert.Open("ip and (tcp or udp)", windivert.LayerNetwork, 0, windivert.FlagSniff|windivert.FlagRecvOnly)
 	if err != nil {
+		close(workerDone)
 		progress <- ScanProgress{Phase: "observe", Message: "WinDivert 网络层监听启动失败：" + err.Error(), Finished: true}
 		return
 	}
@@ -48,30 +57,32 @@ func observeL4D2Flows(ctx context.Context, cfg Config, progress chan<- ScanProgr
 	defer close(done)
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-observeCtx.Done():
 			_ = flowHandle.Shutdown(windivert.ShutdownRecv)
 			_ = packetHandle.Shutdown(windivert.ShutdownRecv)
 		case <-done:
 		}
 	}()
 
-	progress <- ScanProgress{Phase: "observe", Message: fmt.Sprintf("正在观察 left4dead2.exe，PID=%d。正在记录游戏 UDP 端口并从网络包提取服务器 IP。", pid)}
+	progress <- ScanProgress{Phase: "observe", Message: fmt.Sprintf("正在观察 left4dead2.exe，PID=%d。正在记录游戏 TCP/UDP 端口并从网络包提取服务器 IP。", pid)}
 
-	candidates := make(chan string, 512)
-	defer close(candidates)
-	go observeInfoWorker(ctx, cfg, candidates, progress)
+	candidates := make(chan observedCandidate, 4096)
+	go func() {
+		defer close(workerDone)
+		observeInfoWorker(observeCtx, cfg, candidates, progress)
+	}()
 
-	ports := &observedPorts{ports: map[int]bool{}}
+	ports := &observedPorts{ports: map[uint8]map[int]bool{}}
 	seen := &candidateSet{seen: map[string]bool{}}
 	errCh := make(chan string, 2)
-	go observeGameUDPPorts(ctx, flowHandle, pid, ports, errCh)
-	go observeUDPPackets(ctx, packetHandle, ports, seen, candidates, errCh)
+	go observeGameUDPPorts(observeCtx, flowHandle, pid, ports, errCh)
+	go observeUDPPackets(observeCtx, packetHandle, ports, seen, candidates, errCh)
 
 	select {
-	case <-ctx.Done():
+	case <-observeCtx.Done():
 		progress <- ScanProgress{Phase: "observe", Message: "观察已停止。", Finished: true}
 	case msg := <-errCh:
-		if ctx.Err() != nil {
+		if observeCtx.Err() != nil {
 			progress <- ScanProgress{Phase: "observe", Message: "观察已停止。", Finished: true}
 		} else {
 			progress <- ScanProgress{Phase: "observe", Message: msg, Finished: true}
@@ -81,23 +92,31 @@ func observeL4D2Flows(ctx context.Context, cfg Config, progress chan<- ScanProgr
 
 type observedPorts struct {
 	mu    sync.RWMutex
-	ports map[int]bool
+	ports map[uint8]map[int]bool
 }
 
-func (p *observedPorts) add(port int) {
+func (p *observedPorts) add(proto uint8, port int) {
 	if port <= 0 {
 		return
 	}
 	p.mu.Lock()
-	p.ports[port] = true
+	if p.ports[proto] == nil {
+		p.ports[proto] = map[int]bool{}
+	}
+	p.ports[proto][port] = true
 	p.mu.Unlock()
 }
 
-func (p *observedPorts) has(port int) bool {
+func (p *observedPorts) has(proto uint8, port int) bool {
 	p.mu.RLock()
-	ok := p.ports[port]
+	ok := p.ports[proto] != nil && p.ports[proto][port]
 	p.mu.RUnlock()
 	return ok
+}
+
+type observedCandidate struct {
+	address string
+	info    *ServerInfo
 }
 
 type candidateSet struct {
@@ -135,14 +154,14 @@ func observeGameUDPPorts(ctx context.Context, handle windivert.Handle, pid uint3
 			continue
 		}
 		localPort := normalizeObservedPort(flow.LocalPort)
-		ports.add(localPort)
+		ports.add(flow.Protocol, localPort)
 		if observeRawLogCount < 20 {
 			logObservedRawAddress(fmt.Sprintf("game-local-port %d", localPort), flow.Protocol, flow.RemotePort, flow.RemoteAddress)
 		}
 	}
 }
 
-func observeUDPPackets(ctx context.Context, handle windivert.Handle, ports *observedPorts, seen *candidateSet, candidates chan<- string, errCh chan<- string) {
+func observeUDPPackets(ctx context.Context, handle windivert.Handle, ports *observedPorts, seen *candidateSet, candidates chan<- observedCandidate, errCh chan<- string) {
 	packet := make([]byte, 65535)
 	for {
 		var addr windivert.Address
@@ -157,32 +176,54 @@ func observeUDPPackets(ctx context.Context, handle windivert.Handle, ports *obse
 		if addr.Event() != windivert.EventNetworkPacket {
 			continue
 		}
-		pkt, ok := parseIPv4UDPPacket(packet[:n])
+		pkt, ok := parseIPv4TransportPacket(packet[:n])
 		if !ok {
 			continue
 		}
 		var remoteIP string
 		var remotePort int
-		if ports.has(pkt.srcPort) && looksLikeSourceServerPort(pkt.dstPort) {
+		gamePacket := false
+		if ports.has(pkt.proto, pkt.srcPort) {
 			remoteIP = pkt.dstIP
 			remotePort = pkt.dstPort
-		} else if ports.has(pkt.dstPort) && looksLikeSourceServerPort(pkt.srcPort) {
+			gamePacket = true
+		} else if ports.has(pkt.proto, pkt.dstPort) {
 			remoteIP = pkt.srcIP
 			remotePort = pkt.srcPort
+			gamePacket = true
 		} else {
+			continue
+		}
+		if !gamePacket {
+			continue
+		}
+		if pkt.proto == 17 {
+			for _, addr := range parseObservedMasterPayload(pkt.payload) {
+				if seen.add(addr) {
+					sendObservedCandidate(ctx, candidates, observedCandidate{address: addr})
+				}
+			}
+		}
+		if !looksLikeSourceServerPort(remotePort) {
 			continue
 		}
 		if remoteIP == "" || remoteIP == "0.0.0.0" || remoteIP == "255.255.255.255" {
 			continue
 		}
 		key := net.JoinHostPort(remoteIP, strconv.Itoa(remotePort))
-		if !seen.add(key) {
+		if !isUsableServerAddress(key) {
 			continue
 		}
-		select {
-		case candidates <- key:
-		default:
+		candidate := observedCandidate{address: key}
+		if pkt.proto == 17 && len(pkt.payload) > 0 {
+			if info, ok := parseObservedA2SInfo(key, pkt.payload); ok {
+				candidate.info = info
+			}
 		}
+		if !seen.add(key) && candidate.info == nil {
+			continue
+		}
+		sendObservedCandidate(ctx, candidates, candidate)
 	}
 }
 
@@ -191,9 +232,11 @@ type udpPacketInfo struct {
 	dstIP   string
 	srcPort int
 	dstPort int
+	proto   uint8
+	payload []byte
 }
 
-func parseIPv4UDPPacket(packet []byte) (udpPacketInfo, bool) {
+func parseIPv4TransportPacket(packet []byte) (udpPacketInfo, bool) {
 	if len(packet) < 28 {
 		return udpPacketInfo{}, false
 	}
@@ -205,37 +248,61 @@ func parseIPv4UDPPacket(packet []byte) (udpPacketInfo, bool) {
 	if ihl < 20 || len(packet) < ihl+8 {
 		return udpPacketInfo{}, false
 	}
-	if packet[9] != 17 {
+	proto := packet[9]
+	if proto != 17 && proto != 6 {
 		return udpPacketInfo{}, false
+	}
+	headerLen := 8
+	if proto == 6 {
+		if len(packet) < ihl+20 {
+			return udpPacketInfo{}, false
+		}
+		headerLen = int(packet[ihl+12]>>4) * 4
+		if headerLen < 20 || len(packet) < ihl+headerLen {
+			return udpPacketInfo{}, false
+		}
 	}
 	return udpPacketInfo{
 		srcIP:   net.IPv4(packet[12], packet[13], packet[14], packet[15]).String(),
 		dstIP:   net.IPv4(packet[16], packet[17], packet[18], packet[19]).String(),
 		srcPort: int(binary.BigEndian.Uint16(packet[ihl : ihl+2])),
 		dstPort: int(binary.BigEndian.Uint16(packet[ihl+2 : ihl+4])),
+		proto:   proto,
+		payload: packet[ihl+headerLen:],
 	}, true
 }
 
-func observeInfoWorker(ctx context.Context, cfg Config, candidates <-chan string, progress chan<- ScanProgress) {
+func observeInfoWorker(ctx context.Context, cfg Config, candidates <-chan observedCandidate, progress chan<- ScanProgress) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case key, ok := <-candidates:
+		case candidate, ok := <-candidates:
 			if !ok {
 				return
 			}
-			info := queryServer(ctx, key, 1600*time.Millisecond)
+			key := candidate.address
+			info := queryServer(ctx, key, 1200*time.Millisecond)
 			if info.Error != "" {
-				info = ServerInfo{
-					Address:    key,
-					Host:       "候选服务器，暂未获取名称",
-					Players:    -1,
-					MaxPlayers: -1,
-					PingMS:     0,
-					LastSeen:   time.Now(),
+				if candidate.info != nil {
+					info = *candidate.info
+					info.BlockReasons = appendUniqueReason(info.BlockReasons, "游戏列表包")
+					info.BlockReasons = appendUniqueReason(info.BlockReasons, "A2S未响应")
+				} else {
+					info = ServerInfo{
+						Address:    key,
+						Host:       "候选服务器，暂未获取名称",
+						Players:    -1,
+						MaxPlayers: -1,
+						PingMS:     0,
+						LastSeen:   time.Now(),
+					}
 				}
+				applyRules(&info, cfg)
 			} else {
+				if candidate.info != nil {
+					info.BlockReasons = appendUniqueReason(info.BlockReasons, "游戏列表包")
+				}
 				applyRules(&info, cfg)
 			}
 			select {
@@ -245,6 +312,43 @@ func observeInfoWorker(ctx context.Context, cfg Config, candidates <-chan string
 			}
 		}
 	}
+}
+
+func sendObservedCandidate(ctx context.Context, candidates chan<- observedCandidate, candidate observedCandidate) {
+	select {
+	case candidates <- candidate:
+	case <-ctx.Done():
+	default:
+	}
+}
+
+func parseObservedMasterPayload(payload []byte) []string {
+	if len(payload) < 8 {
+		return nil
+	}
+	addrs := parseMasterResponse(payload)
+	out := make([]string, 0, len(addrs))
+	for _, addr := range addrs {
+		if addr != "" && addr != "0.0.0.0:0" && isUsableServerAddress(addr) {
+			out = append(out, addr)
+		}
+	}
+	return out
+}
+
+func parseObservedA2SInfo(address string, payload []byte) (*ServerInfo, bool) {
+	if len(payload) < 6 || payload[0] != 0xff || payload[1] != 0xff || payload[2] != 0xff || payload[3] != 0xff || payload[4] != 0x49 {
+		return nil, false
+	}
+	info := &ServerInfo{
+		Address:  address,
+		PingMS:   0,
+		LastSeen: time.Now(),
+	}
+	if err := parseA2SInfo(payload, info); err != nil {
+		return nil, false
+	}
+	return info, true
 }
 
 func flowAddressToIP(raw [16]uint8) string {

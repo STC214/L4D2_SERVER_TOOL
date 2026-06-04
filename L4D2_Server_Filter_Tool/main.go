@@ -93,27 +93,27 @@ const (
 	LVM_INSERTCOLUMN             = LVM_FIRST + 97
 	LVM_INSERTITEM               = LVM_FIRST + 77
 	LVM_SETITEM                  = LVM_FIRST + 76
+	LVM_SETITEMTEXT              = LVM_FIRST + 116
 	LVM_DELETEALLITEMS           = LVM_FIRST + 9
+	LVM_GETITEMCOUNT             = LVM_FIRST + 4
+	LVM_GETTOPINDEX              = LVM_FIRST + 39
+	LVM_ENSUREVISIBLE            = LVM_FIRST + 19
 	LVM_SETTEXTCOLOR             = LVM_FIRST + 36
 	LVM_SETTEXTBKCOLOR           = LVM_FIRST + 38
 	LVM_SETEXTENDEDLISTVIEWSTYLE = LVM_FIRST + 54
 	LVS_EX_FULLROWSELECT         = 0x00000020
 	LVS_EX_GRIDLINES             = 0x00000001
+	LVS_EX_DOUBLEBUFFER          = 0x00010000
+	LVS_REPORT                   = 0x0001
+	LVS_SHOWSELALWAYS            = 0x0008
+	LVS_SINGLESEL                = 0x0004
 
-	LVCF_TEXT              = 0x0004
-	LVCF_WIDTH             = 0x0002
-	LVCF_FMT               = 0x0001
-	LVIF_TEXT              = 0x0001
-	LB_ADDSTRING           = 0x0180
-	LB_INSERTSTRING        = 0x0181
-	LB_DELETESTRING        = 0x0182
-	LB_RESETCONTENT        = 0x0184
-	LB_GETCOUNT            = 0x018B
-	LB_GETTOPINDEX         = 0x018E
-	LB_SETTOPINDEX         = 0x0197
-	LB_SETHORIZONTALEXTENT = 0x0194
-	BM_GETCHECK            = 0x00F0
-	BST_CHECKED            = 1
+	LVCF_TEXT   = 0x0004
+	LVCF_WIDTH  = 0x0002
+	LVCF_FMT    = 0x0001
+	LVIF_TEXT   = 0x0001
+	BM_GETCHECK = 0x00F0
+	BST_CHECKED = 1
 
 	ID_SCAN           = 1001
 	ID_CANCEL         = 1002
@@ -386,14 +386,13 @@ func createControls(hwnd uintptr) {
 	app.resultMeta = child("STATIC", "暂无结果", WS_CHILD|WS_VISIBLE|SS_LEFT, 0)
 	app.searchEdit = childEx(WS_EX_CLIENTEDGE, "EDIT", "", WS_CHILD|WS_VISIBLE|WS_BORDER|ES_AUTOHSCROLL|WS_TABSTOP, ID_SEARCH)
 	setSearchPlaceholder(true)
-	app.list = childEx(WS_EX_CLIENTEDGE, "LISTBOX", "", WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL|WS_TABSTOP|LBS_NOINTEGRALHEIGHT, 0)
-	debugLog("controls: listbox")
+	app.list = childEx(WS_EX_CLIENTEDGE, "SysListView32", "", WS_CHILD|WS_VISIBLE|WS_VSCROLL|WS_HSCROLL|WS_TABSTOP|LVS_REPORT|LVS_SHOWSELALWAYS|LVS_SINGLESEL, 0)
+	debugLog("controls: listview")
 	for _, h := range []uintptr{app.btnScan, app.btnCancel, app.btnApply, app.btnRemove, app.btnExport, app.btnOpen, app.btnCheck, app.btnStopObs, app.btnHuorong, app.chkMatched, app.status, app.edit, app.resultTitle, app.resultMeta, app.searchEdit} {
 		send(h, WM_SETFONT, app.font, 1)
 	}
-	send(app.list, WM_SETFONT, app.listFont, 1)
-	send(app.list, LB_SETHORIZONTALEXTENT, 2200, 0)
-	insertResultHeader()
+	send(app.list, WM_SETFONT, app.font, 1)
+	initResultListView()
 	updateResultSummary(0, 0, 0)
 	if len(app.all) > 0 {
 		refreshResults()
@@ -588,7 +587,7 @@ func drainProgress() {
 	for _, p := range q {
 		if p.Phase == "observe" && p.Server != nil {
 			markIPChange(p.Server)
-			app.all = append(app.all, *p.Server)
+			upsertServer(*p.Server)
 			app.observeSeen++
 			addBlockedIPFromServer(*p.Server)
 			if app.observeSeen == 1 || app.observeSeen%10 == 0 {
@@ -597,7 +596,7 @@ func drainProgress() {
 		}
 		if p.Phase != "observe" && p.Server != nil {
 			markIPChange(p.Server)
-			app.all = append(app.all, *p.Server)
+			upsertServer(*p.Server)
 			addBlockedIPFromServer(*p.Server)
 		}
 		if p.Total > 0 && !p.Finished {
@@ -644,6 +643,49 @@ func beginListPopulate(rows []ServerInfo) {
 	setStatus(fmt.Sprintf("完成：共 %d 条结果，命中 %d 个 IP。", len(app.all), len(app.blockedIPs)))
 }
 
+func upsertServer(s ServerInfo) {
+	if s.Address == "" {
+		return
+	}
+	for i := range app.all {
+		if app.all[i].Address == s.Address {
+			app.all[i] = mergeServerInfo(app.all[i], s)
+			return
+		}
+	}
+	app.all = append(app.all, s)
+}
+
+func mergeServerInfo(old, next ServerInfo) ServerInfo {
+	if next.Host == "" && old.Host != "" {
+		next.Host = old.Host
+	}
+	if next.Map == "" && old.Map != "" {
+		next.Map = old.Map
+	}
+	if next.Folder == "" && old.Folder != "" {
+		next.Folder = old.Folder
+	}
+	if next.Game == "" && old.Game != "" {
+		next.Game = old.Game
+	}
+	if next.Keywords == "" && old.Keywords != "" {
+		next.Keywords = old.Keywords
+	}
+	if next.PreviousAddress == "" {
+		next.PreviousAddress = old.PreviousAddress
+	}
+	next.IPChanged = next.IPChanged || old.IPChanged
+	next.Blocked = next.Blocked || old.Blocked
+	for _, reason := range old.BlockReasons {
+		next.BlockReasons = appendUniqueReason(next.BlockReasons, reason)
+	}
+	if next.LastSeen.IsZero() {
+		next.LastSeen = old.LastSeen
+	}
+	return next
+}
+
 func populateListBatch() {
 	if app.renderIndex >= len(app.renderRows) {
 		app.rendering = false
@@ -677,10 +719,23 @@ func populateListBatch() {
 	}
 }
 func insertServer(s ServerInfo) {
-	addResultLine(serverLine(s))
+	count := int(send(app.list, LVM_GETITEMCOUNT, 0, 0))
+	insertResultRow(count, s)
 }
 
-func serverLine(s ServerInfo) string {
+func resultCells(s ServerInfo) []string {
+	return []string{
+		displayStatus(s),
+		displayPing(s),
+		displayPlayers(s),
+		s.Map,
+		s.Address,
+		s.Host,
+		displayReasons(s),
+	}
+}
+
+func displayStatus(s ServerInfo) string {
 	status := "正常"
 	if s.Blocked {
 		status = "命中"
@@ -688,15 +743,10 @@ func serverLine(s ServerInfo) string {
 	if s.IPChanged {
 		status = "变更"
 	}
-	return fmt.Sprintf("| %-4s | %-7s | %-7s | %-20s | %-24s | %-42s | %-32s |",
-		status,
-		displayPing(s),
-		displayPlayers(s),
-		trimDisplay(s.Map, 20),
-		trimDisplay(s.Address, 24),
-		trimDisplay(s.Host, 42),
-		trimDisplay(displayReasons(s), 32),
-	)
+	if !s.Blocked && hasReason(s, "A2S未响应") {
+		status = "未响应"
+	}
+	return status
 }
 
 func displayReasons(s ServerInfo) string {
@@ -705,6 +755,15 @@ func displayReasons(s ServerInfo) string {
 		reasons = append(reasons, "IP变更:"+s.PreviousAddress)
 	}
 	return strings.Join(reasons, " ")
+}
+
+func hasReason(s ServerInfo, reason string) bool {
+	for _, item := range s.BlockReasons {
+		if item == reason {
+			return true
+		}
+	}
+	return false
 }
 
 func displayPing(s ServerInfo) string {
@@ -722,26 +781,6 @@ func displayPlayers(s ServerInfo) string {
 		return fmt.Sprintf("%d", s.Players)
 	}
 	return fmt.Sprintf("%d/%d", s.Players, s.MaxPlayers)
-}
-
-func trimDisplay(s string, max int) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "-"
-	}
-	r := []rune(s)
-	if len(r) <= max {
-		return s
-	}
-	if max <= 1 {
-		return string(r[:max])
-	}
-	return string(r[:max-1]) + "~"
-}
-
-func getListCountApprox() int32 {
-	r := send(app.list, LB_GETCOUNT, 0, 0)
-	return int32(r)
 }
 
 func startAutoRefresh() {
@@ -833,17 +872,19 @@ func refreshResults() {
 		return
 	}
 	recalculateMatches()
-	topIndex := send(app.list, LB_GETTOPINDEX, 0, 0)
-	lines := resultHeaderLines()
+	topIndex := int(send(app.list, LVM_GETTOPINDEX, 0, 0))
+	rows := make([]ServerInfo, 0, len(app.all))
 	shown := 0
 	for _, s := range app.all {
 		if shouldShowServer(s) {
-			lines = append(lines, serverLine(s))
+			rows = append(rows, s)
 			shown++
 		}
 	}
-	applyResultLines(lines)
-	send(app.list, LB_SETTOPINDEX, topIndex, 0)
+	applyResultRows(rows)
+	if topIndex > 0 && topIndex < shown {
+		send(app.list, LVM_ENSUREVISIBLE, uintptr(topIndex), 0)
+	}
 	procInvalidateRect.Call(app.list, 0, 1)
 	updateResultSummary(shown, len(app.all), len(app.blockedIPs))
 }
@@ -856,9 +897,7 @@ func recalculateMatches() {
 		if app.all[i].Error != "" {
 			continue
 		}
-		if !isCandidateWithoutA2S(app.all[i]) {
-			applyRules(&app.all[i], app.cfg)
-		}
+		applyRules(&app.all[i], app.cfg)
 		addBlockedIPFromServer(app.all[i])
 	}
 }
@@ -904,12 +943,24 @@ func rebuildSavedNameIPs() {
 }
 
 func serverNameKey(name string) string {
-	return normalizeText(name)
+	key := normalizeText(name)
+	if key == "" ||
+		strings.Contains(key, "候选服务器") ||
+		strings.Contains(key, "暂未获取名称") ||
+		key == "left 4 dead 2" ||
+		key == "l4d2" ||
+		key == "srcds" {
+		return ""
+	}
+	return key
 }
 
 func serverIP(address string) string {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil {
+		return ""
+	}
+	if !isUsableServerAddress(address) {
 		return ""
 	}
 	ip := net.ParseIP(host)
@@ -929,12 +980,7 @@ func isCandidateWithoutA2S(s ServerInfo) bool {
 }
 
 func isIPv4Server(address string) bool {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil {
-		return false
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.To4() != nil
+	return isUsableServerAddress(address)
 }
 
 func serverMatchesSearch(s ServerInfo, query string) bool {
@@ -976,7 +1022,7 @@ func addBlockedIPFromServer(s ServerInfo) {
 		return
 	}
 	ip, _, err := net.SplitHostPort(s.Address)
-	if err == nil && ip != "" && !stringInSlice(ip, app.blockedIPs) {
+	if err == nil && ip != "" && isUsableServerAddress(s.Address) && !stringInSlice(ip, app.blockedIPs) {
 		app.blockedIPs = append(app.blockedIPs, ip)
 	}
 }
@@ -1027,7 +1073,7 @@ func recordsFromCurrentBlocked(source string) []BlockRecord {
 			continue
 		}
 		ip, _, err := net.SplitHostPort(s.Address)
-		if err != nil || ip == "" || seen[ip] {
+		if err != nil || ip == "" || !isUsableServerAddress(s.Address) || seen[ip] {
 			continue
 		}
 		seen[ip] = true
@@ -1083,92 +1129,81 @@ func clearResults() {
 	if app.list == 0 {
 		return
 	}
-	send(app.list, LB_RESETCONTENT, 0, 0)
+	send(app.list, LVM_DELETEALLITEMS, 0, 0)
 	app.renderedLines = nil
-	applyResultLines(resultHeaderLines())
 }
 
-func insertResultHeader() {
-	applyResultLines(resultHeaderLines())
-}
-
-func resultHeaderLines() []string {
-	return []string{
-		"+------+---------+---------+----------------------+--------------------------+--------------------------------------------+----------------------------------+",
-		"| 状态 | 延迟    | 人数    | 地图                 | 地址                     | 服务器                                     | 命中原因                         |",
-		"+------+---------+---------+----------------------+--------------------------+--------------------------------------------+----------------------------------+",
-	}
-}
-
-func addResultLine(line string) {
-	t := utf16(line)
-	send(app.list, LB_ADDSTRING, 0, uintptr(unsafe.Pointer(t)))
-}
-
-func applyResultLines(lines []string) {
+func initResultListView() {
 	if app.list == 0 {
 		return
 	}
-	if len(app.renderedLines) == 0 {
-		send(app.list, WM_SETREDRAW, 0, 0)
-		send(app.list, LB_RESETCONTENT, 0, 0)
-		for _, line := range lines {
-			addResultLine(line)
+	send(app.list, LVM_SETEXTENDEDLISTVIEWSTYLE, 0, LVS_EX_FULLROWSELECT|LVS_EX_GRIDLINES|LVS_EX_DOUBLEBUFFER)
+	send(app.list, LVM_SETBKCOLOR, 0, uintptr(rgb(24, 26, 31)))
+	send(app.list, LVM_SETTEXTBKCOLOR, 0, uintptr(rgb(24, 26, 31)))
+	send(app.list, LVM_SETTEXTCOLOR, 0, uintptr(rgb(229, 233, 240)))
+	columns := []struct {
+		title string
+		width int32
+	}{
+		{"状态", 76},
+		{"延迟", 78},
+		{"人数", 78},
+		{"地图", 150},
+		{"地址", 164},
+		{"服务器", 330},
+		{"命中原因", 260},
+	}
+	for i, col := range columns {
+		text := utf16(col.title)
+		c := lvcolumn{
+			Mask:    LVCF_TEXT | LVCF_WIDTH,
+			Cx:      col.width,
+			Text:    text,
+			SubItem: int32(i),
 		}
-		send(app.list, WM_SETREDRAW, 1, 0)
-		app.renderedLines = append([]string(nil), lines...)
+		send(app.list, LVM_INSERTCOLUMN, uintptr(i), uintptr(unsafe.Pointer(&c)))
+	}
+}
+
+func applyResultRows(rows []ServerInfo) {
+	if app.list == 0 {
 		return
 	}
-
-	common := len(app.renderedLines)
-	if len(lines) < common {
-		common = len(lines)
+	send(app.list, WM_SETREDRAW, 0, 0)
+	send(app.list, LVM_DELETEALLITEMS, 0, 0)
+	for i, row := range rows {
+		insertResultRow(i, row)
 	}
-	changes := countResultLineChanges(lines, common)
-	if changes == 0 {
+	send(app.list, WM_SETREDRAW, 1, 0)
+}
+
+func insertResultRow(index int, s ServerInfo) {
+	cells := resultCells(s)
+	if len(cells) == 0 {
 		return
 	}
-	if changes > 30 {
-		send(app.list, WM_SETREDRAW, 0, 0)
-		defer send(app.list, WM_SETREDRAW, 1, 0)
+	text := utf16(cells[0])
+	item := lvitem{
+		Mask:    LVIF_TEXT,
+		Item:    int32(index),
+		SubItem: 0,
+		Text:    text,
 	}
-	for i := 0; i < common; i++ {
-		if app.renderedLines[i] != lines[i] {
-			replaceResultLine(i, lines[i])
-		}
+	send(app.list, LVM_INSERTITEM, 0, uintptr(unsafe.Pointer(&item)))
+	for col := 1; col < len(cells); col++ {
+		setResultCell(index, col, cells[col])
 	}
-	for i := len(app.renderedLines) - 1; i >= len(lines); i-- {
-		send(app.list, LB_DELETESTRING, uintptr(i), 0)
-	}
-	for i := len(app.renderedLines); i < len(lines); i++ {
-		insertResultLine(i, lines[i])
-	}
-	app.renderedLines = append([]string(nil), lines...)
 }
 
-func countResultLineChanges(lines []string, common int) int {
-	changes := 0
-	for i := 0; i < common; i++ {
-		if app.renderedLines[i] != lines[i] {
-			changes++
-		}
+func setResultCell(row, col int, value string) {
+	text := utf16(value)
+	item := lvitem{
+		Mask:    LVIF_TEXT,
+		Item:    int32(row),
+		SubItem: int32(col),
+		Text:    text,
 	}
-	if len(app.renderedLines) > len(lines) {
-		changes += len(app.renderedLines) - len(lines)
-	} else {
-		changes += len(lines) - len(app.renderedLines)
-	}
-	return changes
-}
-
-func replaceResultLine(index int, line string) {
-	send(app.list, LB_DELETESTRING, uintptr(index), 0)
-	insertResultLine(index, line)
-}
-
-func insertResultLine(index int, line string) {
-	t := utf16(line)
-	send(app.list, LB_INSERTSTRING, uintptr(index), uintptr(unsafe.Pointer(t)))
+	send(app.list, LVM_SETITEMTEXT, uintptr(row), uintptr(unsafe.Pointer(&item)))
 }
 
 func updateResultSummary(shown, total, blocked int) {

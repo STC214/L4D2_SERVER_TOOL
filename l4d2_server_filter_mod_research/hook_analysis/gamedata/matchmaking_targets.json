@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "game": "Left 4 Dead 2",
+  "module": "left4dead2/bin/matchmaking.dll",
+  "module_name": "matchmaking.dll",
+  "image_base": "0x10000000",
+  "source_report": "hook_analysis/reports/signature_scout_report.md",
+  "targets": [
+    {
+      "name": "group_refresh_entry",
+      "rva": "0x211E0",
+      "role": "Steam group-server refresh entry",
+      "pattern": "558BEC81EC2C010000A13076061033C58945FC0F57C0568BF1F30F104E480F2EC89FF6C4447B73F30F104E4C0F2EC89F",
+      "mask": "xxxxxxxxxx????xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected_hits": 1
+    },
+    {
+      "name": "manager_wait_details",
+      "rva": "0x21570",
+      "role": "Server manager waits for detail replies",
+      "pattern": "558BEC5156578BF1FF15A0F10410D95DFC33FF397E287E508B461C8B04B885C0741A8B0D94BD0610F30F1045FCF30F5C",
+      "mask": "xxxxxxxxxx????xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected_hits": 1
+    },
+    {
+      "name": "details_consume_candidate",
+      "rva": "0x21B80",
+      "role": "Candidate detail response consumer/parser",
+      "pattern": "558BEC83EC60A13076061033C58945FC5356578B7D08894DAC8BCF897DA0E8FDE400008BD868F81B051053E800DA0000",
+      "mask": "xxxxxxx????xxxxxxxxxxxxxxxxxxxx????xxx????xx????",
+      "expected_hits": 1
+    },
+    {
+      "name": "details_fields_candidate",
+      "rva": "0x22750",
+      "role": "Candidate visible field extractor",
+      "pattern": "558BEC83EC38A13076061033C58945FC8B4508566A008D4DCC8945C8E89F3D01006A008D4DCCE8C53D01006A038D4DCC",
+      "mask": "xxxxxxx????xxxxxxxxxxxxxxxxxx????xxxxxx????xxxxx",
+      "expected_hits": 1
+    },
+    {
+      "name": "dedicated_accept_reject",
+      "rva": "0x2D9D0",
+      "role": "Dedicated/random-match accept-reject path",
+      "pattern": "558BEC81EC28020000A13076061033C58945FC8B550C8B450853568BD98B0DF44A06108B49208B3157528B561C50899D",
+      "mask": "xxxxxxxxxx????xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expected_hits": 1
+    }
+  ]
+}

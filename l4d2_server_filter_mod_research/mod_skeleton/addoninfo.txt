@@ -1,0 +1,9 @@
+"AddonInfo"
+{
+    addonSteamAppID        "550"
+    addonTitle             "L4D2 Server Filter"
+    addonVersion           "0.1.0"
+    addonAuthor            "Local"
+    addonDescription       "Keyword configuration resources for an external Left 4 Dead 2 server filtering workflow."
+}
+

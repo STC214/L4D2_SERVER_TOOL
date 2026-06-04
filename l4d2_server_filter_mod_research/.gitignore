@@ -1,0 +1,43 @@
+# Build outputs
+*.exe
+*.dll
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.syso
+
+# Runtime logs and captures
+*.log
+*.dmp
+*.dump
+*.pcap
+*.pcapng
+*.etl
+*.tmp
+*.bak
+
+# Portable release output
+L4D2_Row_Filter_Portable*/
+release*/
+dist/
+
+# Generated icon assets
+hook_analysis/tools/row_filter_manager_gui/assets/app_icon.ico
+hook_analysis/tools/row_filter_manager_gui/assets/app_icon.png
+
+# Mutable local runtime configs.
+# The committed seeds live under config_defaults/.
+hook_analysis/tools/matchmaking_row_filter_dll/blocked_keywords.txt
+hook_analysis/tools/matchmaking_row_filter_dll/blocked_connectstrings.txt
+hook_analysis/tools/matchmaking_row_filter_dll/learned_connectstrings.txt
+hook_analysis/tools/matchmaking_row_filter_dll/auto_derived_connectstrings.txt
+hook_analysis/tools/matchmaking_row_filter_dll/*.last_report_success
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini

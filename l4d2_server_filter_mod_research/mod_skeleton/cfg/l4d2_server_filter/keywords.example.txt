@@ -1,0 +1,6 @@
+# one keyword per line
+# empty lines and lines starting with # are ignored
+rpg
+vip
+shop
+

@@ -1,0 +1,51 @@
+// x32dbg script: L4D2 matchmaking.dll row-suppression path observation
+//
+// Goal:
+// - Identify where Steam group-server rows receive visible server details.
+// - Focus on hiding specified rows, not only blocking join attempts.
+//
+// Usage:
+// 1. Start L4D2 and wait for the main menu.
+// 2. Attach x32dbg to left4dead2.exe.
+// 3. Confirm matchmaking.dll is loaded.
+// 4. Run this script.
+// 5. Let the main-menu Steam group-server refresh happen.
+//
+// Priority:
+// - 0x22750 is still the first field-observation point.
+// - 0x54480 is a data table slot, not executable code.
+// - 0x66104 is a data/global slot. Use a memory breakpoint/watch manually if needed.
+
+// Table owner / registration clue.
+// This code writes matchmaking.dll+54480 into data slot matchmaking.dll+66104.
+bp matchmaking.dll+4EB20
+
+// Details callback table compact span:
+// data slot:          matchmaking.dll+5447C
+// first function ptr: matchmaking.dll+54480 -> function 226B0
+// visible fields:     matchmaking.dll+54484 -> function 22750
+bp matchmaking.dll+226B0
+bp matchmaking.dll+22750
+bp matchmaking.dll+22CA0
+bp matchmaking.dll+22B20
+bp matchmaking.dll+22DC0
+bp matchmaking.dll+226F0
+
+// Earlier manager/detail-response path.
+bp matchmaking.dll+21B80
+bp matchmaking.dll+21570
+bp matchmaking.dll+219E0
+bp matchmaking.dll+21A70
+
+// Refresh request entry.
+bp matchmaking.dll+211E0
+
+// Lower-priority random/dedicated accept-reject path.
+bp matchmaking.dll+2D9D0
+
+// Manual watch suggestions:
+// - Watch dword [matchmaking.dll+66104]; expected value: matchmaking.dll+54480.
+// - At matchmaking.dll+22750 inspect ECX, EAX, EDX, ESP args, EBP args.
+// - Look for strings or KeyValues containing:
+//   GameDetailsServer, Server/name, Server/adronline, Server/adrlocal,
+//   Members/numSlots, Members/numPlayers, server display name, ip:port.

@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "updated_at": "2026-06-04T10:40:00+08:00",
+  "purpose": "Default seed rules collected from successful L4D2 Steam group-server filter runs.",
+  "keywords": [
+    {
+      "label": "RPG",
+      "match_text": "rpg",
+      "notes": "ASCII case-insensitive in DLL; matches RPG/Rpg/rPg."
+    },
+    {
+      "label": "星缘",
+      "match_text": "星缘",
+      "notes": "Starry Sky / XY family."
+    },
+    {
+      "label": "破晓",
+      "match_text": "破晓",
+      "notes": "PX family."
+    },
+    {
+      "label": "杀戮",
+      "match_text": "杀戮",
+      "notes": "Kill family."
+    },
+    {
+      "label": "神域",
+      "match_text": "神域",
+      "notes": "Domain family."
+    }
+  ],
+  "manual_blocked_connectstrings": [
+    {
+      "value": "183.216.53.181",
+      "reason": "Previously blocked server family."
+    },
+    {
+      "value": "118.25.230.120:28888",
+      "reason": "Previously blocked server endpoint."
+    },
+    {
+      "value": "118.25.230.120:33333",
+      "reason": "Previously blocked server endpoint."
+    },
+    {
+      "value": "110.42.9.24",
+      "reason": "XY/Starry Sky public A2S identity family."
+    }
+  ],
+  "learned_identity_hosts": [
+    "103.28.54.214",
+    "103.40.13.9",
+    "110.42.9.24",
+    "111.170.151.115",
+    "111.229.0.95",
+    "114.66.17.54",
+    "117.72.73.87",
+    "118.170.81.197",
+    "120.220.73.225",
+    "120.24.67.55",
+    "120.77.206.2",
+    "120.77.24.39",
+    "120.78.174.64",
+    "120.79.41.192",
+    "168.119.123.55",
+    "175.178.67.78",
+    "192.168.13.225",
+    "220.246.168.228",
+    "221.181.185.37",
+    "43.139.11.22",
+    "43.249.194.250",
+    "8.137.33.22"
+  ],
+  "auto_derived_hosts": [
+    {
+      "value": "61.147.247.31",
+      "reason": "XY/Starry Sky direct family derived from repeated disguised Steam group-server rows."
+    },
+    {
+      "value": "8.152.6.214",
+      "reason": "Previously derived disguised large-pool/default-name family."
+    }
+  ],
+  "instant_heuristics": [
+    {
+      "id": "disguised_default_official_map",
+      "rule": "Name == Left 4 Dead 2, official L4D2 map, MaxPlayers > 8",
+      "purpose": "Current-refresh drop for spoofed/default-name entry rows."
+    },
+    {
+      "id": "disguised_default_large_pool",
+      "rule": "Name == Left 4 Dead 2, MaxPlayers >= 128",
+      "purpose": "Immediate drop for XY-style rows where map field is unavailable early."
+    },
+    {
+      "id": "xy_hk_official_map",
+      "rule": "Name contains Valve Left4Dead 2 Hong Kong Server, official L4D2 map, MaxPlayers > 8",
+      "purpose": "Immediate drop for alternate XY/Starry Sky style."
+    }
+  ],
+  "runtime_policy": {
+    "old_auto_derived_hosts": "Load at DLL startup as next-launch fast path.",
+    "new_auto_derived_hosts": "Derive from current Steam group-server item rows and persist only when the host set changes.",
+    "file_write_policy": "Write auto-derived config via temp file and atomic replace on a short background thread.",
+    "safety_note": "Current-refresh hiding must use instant heuristics or existing config; newly derived hosts mainly strengthen later rows and future launches."
+  }
+}
