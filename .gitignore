@@ -51,6 +51,17 @@ _windivert_extract/
 # Local snapshots and old bundled copies
 archive/
 
+# Local image/icon assets. Keep user-provided or potentially copyrighted
+# artwork out of the repository; generated release icons can be rebuilt locally.
+*.ico
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.gif
+*.webp
+*.svg
+
 # Mutable local filter configs. Seed defaults are kept under config_defaults/.
 l4d2_server_filter_mod_research/hook_analysis/tools/matchmaking_row_filter_dll/blocked_keywords.txt
 l4d2_server_filter_mod_research/hook_analysis/tools/matchmaking_row_filter_dll/blocked_connectstrings.txt
