@@ -34,8 +34,10 @@ const (
 	BS_GROUPBOX         = 0x00000007
 	SS_LEFT             = 0x00000000
 
+	SW_HIDE       = 0
 	SW_SHOW       = 5
 	SW_SHOWNORMAL = 1
+	SW_RESTORE    = 9
 
 	WM_CREATE         = 0x0001
 	WM_DESTROY        = 0x0002
@@ -52,7 +54,11 @@ const (
 	WM_CTLCOLOREDIT   = 0x0133
 	WM_CTLCOLORSTATIC = 0x0138
 	WM_CTLCOLORBTN    = 0x0135
+	WM_LBUTTONUP      = 0x0202
+	WM_LBUTTONDBLCLK  = 0x0203
 	WM_APP            = 0x8000
+
+	SIZE_MINIMIZED = 1
 
 	ICON_SMALL     = 0
 	ICON_BIG       = 1
@@ -73,9 +79,19 @@ const (
 	ID_TIMER   = 2001
 
 	WM_APP_EVENT = WM_APP + 1
+	WM_TRAY_ICON = WM_APP + 2
 
 	MOVEFILE_REPLACE_EXISTING = 0x00000001
 	MOVEFILE_WRITE_THROUGH    = 0x00000008
+
+	NIM_ADD    = 0x00000000
+	NIM_DELETE = 0x00000002
+
+	NIF_MESSAGE = 0x00000001
+	NIF_ICON    = 0x00000002
+	NIF_TIP     = 0x00000004
+
+	TRAY_ICON_ID = 1
 )
 
 var (
@@ -90,6 +106,7 @@ var (
 	procLoadCursor       = user32.NewProc("LoadCursorW")
 	procLoadIcon         = user32.NewProc("LoadIconW")
 	procLoadImage        = user32.NewProc("LoadImageW")
+	procSetForeground    = user32.NewProc("SetForegroundWindow")
 	procRegisterClassEx  = user32.NewProc("RegisterClassExW")
 	procCreateWindowEx   = user32.NewProc("CreateWindowExW")
 	procShowWindow       = user32.NewProc("ShowWindow")
@@ -111,6 +128,7 @@ var (
 	procMessageBox       = user32.NewProc("MessageBoxW")
 	procFillRect         = user32.NewProc("FillRect")
 	procIsUserAnAdmin    = shell32.NewProc("IsUserAnAdmin")
+	procShellNotifyIcon  = shell32.NewProc("Shell_NotifyIconW")
 	procShellExecute     = shell32.NewProc("ShellExecuteW")
 	procGetModuleHandle  = kernel32.NewProc("GetModuleHandleW")
 	procMoveFileEx       = kernel32.NewProc("MoveFileExW")
@@ -149,6 +167,31 @@ type wndclassex struct {
 	IconSm     uintptr
 }
 
+type guid struct {
+	Data1 uint32
+	Data2 uint16
+	Data3 uint16
+	Data4 [8]byte
+}
+
+type notifyIconData struct {
+	CbSize           uint32
+	HWnd             uintptr
+	UID              uint32
+	UFlags           uint32
+	UCallbackMessage uint32
+	HIcon            uintptr
+	SzTip            [128]uint16
+	DwState          uint32
+	DwStateMask      uint32
+	SzInfo           [256]uint16
+	UTimeoutVersion  uint32
+	SzInfoTitle      [64]uint16
+	DwInfoFlags      uint32
+	GuidItem         guid
+	HBalloonIcon     uintptr
+}
+
 type theme struct {
 	bgBrush     uintptr
 	panelBrush  uintptr
@@ -164,6 +207,7 @@ type theme struct {
 type appState struct {
 	hwnd uintptr
 	font uintptr
+	icon uintptr
 
 	title       uintptr
 	subtitle    uintptr
@@ -194,6 +238,7 @@ type appState struct {
 
 	mu                 sync.Mutex
 	busy               bool
+	trayVisible        bool
 	events             []string
 	logLines           []string
 	pendingLoadConfigs bool
@@ -256,6 +301,7 @@ func runUI() {
 	className := utf16Ptr("L4D2RowFilterManagerWindow")
 	hinst, _, _ := procGetModuleHandle.Call(0)
 	appIcon := loadAppIcon(hinst)
+	app.icon = appIcon
 	wc := wndclassex{
 		Size:       uint32(unsafe.Sizeof(wndclassex{})),
 		WndProc:    syscall.NewCallback(wndProc),
@@ -304,10 +350,20 @@ func wndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		refreshLogTail()
 		return 0
 	case WM_SIZE:
+		if wparam == SIZE_MINIMIZED {
+			minimizeToTray(hwnd)
+			return 0
+		}
 		layout(hwnd)
 		return 0
 	case WM_TIMER, WM_APP_EVENT:
 		drainEventsToUI()
+		return 0
+	case WM_TRAY_ICON:
+		if lparam == WM_LBUTTONUP || lparam == WM_LBUTTONDBLCLK {
+			restoreFromTray(hwnd)
+			return 0
+		}
 		return 0
 	case WM_COMMAND:
 		handleCommand(int(wparam & 0xffff))
@@ -328,6 +384,7 @@ func wndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		setControlColors(wparam, uiTheme.textColor, uiTheme.bgColor)
 		return uiTheme.bgBrush
 	case WM_DESTROY:
+		removeTrayIcon()
 		procKillTimer.Call(hwnd, ID_TIMER)
 		procPostQuitMessage.Call(0)
 		return 0
@@ -888,6 +945,53 @@ func move(hwnd uintptr, x, y, w, h int32) {
 	if hwnd != 0 {
 		procMoveWindow.Call(hwnd, uintptr(x), uintptr(y), uintptr(w), uintptr(h), 1)
 	}
+}
+
+func minimizeToTray(hwnd uintptr) {
+	if addTrayIcon(hwnd) {
+		procShowWindow.Call(hwnd, SW_HIDE)
+	}
+}
+
+func restoreFromTray(hwnd uintptr) {
+	removeTrayIcon()
+	procShowWindow.Call(hwnd, SW_RESTORE)
+	procSetForeground.Call(hwnd)
+}
+
+func addTrayIcon(hwnd uintptr) bool {
+	if app.trayVisible || hwnd == 0 {
+		return true
+	}
+	var data notifyIconData
+	data.CbSize = uint32(unsafe.Sizeof(data))
+	data.HWnd = hwnd
+	data.UID = TRAY_ICON_ID
+	data.UFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+	data.UCallbackMessage = WM_TRAY_ICON
+	data.HIcon = app.icon
+	if data.HIcon == 0 {
+		data.HIcon = loadIcon(0, 32512)
+	}
+	copy(data.SzTip[:], syscall.StringToUTF16("L4D2 组服务器过滤器"))
+	ret, _, _ := procShellNotifyIcon.Call(NIM_ADD, uintptr(unsafe.Pointer(&data)))
+	if ret != 0 {
+		app.trayVisible = true
+		return true
+	}
+	return false
+}
+
+func removeTrayIcon() {
+	if !app.trayVisible || app.hwnd == 0 {
+		return
+	}
+	var data notifyIconData
+	data.CbSize = uint32(unsafe.Sizeof(data))
+	data.HWnd = app.hwnd
+	data.UID = TRAY_ICON_ID
+	procShellNotifyIcon.Call(NIM_DELETE, uintptr(unsafe.Pointer(&data)))
+	app.trayVisible = false
 }
 
 func fillBackground(hwnd, hdc uintptr) {

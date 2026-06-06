@@ -81,6 +81,19 @@ cmd /c '"C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxil
 
 L4D2 是 32 位进程，因此注入器和 DLL 必须保持 x86。GUI 管理器可以是 x64。
 
+## 游戏更新后的可用性检查
+
+《Left 4 Dead 2》主程序通常不会频繁大改，但只要游戏、Steamworks 或 Source UI 相关 DLL 更新过，本项目的注入式过滤链路就有可能受到影响。没有大版本变化时，建议按下面顺序做一次轻量自检：
+
+1. 打开 `L4D2_Row_Filter_Manager`，点击启动或注入，确认日志里出现 `matchmaking_row_filter loaded`。
+2. 进入游戏主界面，等待组服务器后台刷新，确认日志里仍能看到 `steam serverlist slot patched`、`steam request` 或 `ServerResponded dropped` 这类关键行。
+3. 打开组服务器列表，确认默认关键字和已学习地址仍能让目标服务器消失或无法进入。
+4. 打开服务器浏览器，依次切换常用标签，确认没有崩溃。LAN 局域网标签当前不做 hook，正常情况下不应再触发过滤逻辑。
+5. 如果过滤失效但游戏不崩，先运行 `Gamedata_Verify_GUI` 或相关 CLI 校验工具，检查记录下来的模块地址、特征码和 RVA 是否仍命中。
+6. 如果游戏崩溃、卡死或日志出现明显异常，立即停止注入，保留 `matchmaking_row_filter.log`，再回到 `hook_analysis` 下重新验证 hook 路径。
+
+简单判断标准：如果 DLL 能加载、Steam server list hook 能安装、`ServerResponded dropped` 仍出现，并且组服务器/服务器浏览器操作不崩，那么在这次游戏更新后工具大概率仍然可用。反之不要硬用，应先重新跑校验和分析流程。
+
 ## 仓库卫生
 
 以下内容默认不进入仓库：
@@ -103,4 +116,3 @@ l4d2_server_filter_mod_research\hook_analysis\tools\matchmaking_row_filter_dll\c
 ## 项目状态
 
 当前项目不是 Steam 创意工坊 VPK mod，而是以外部工具和实验性注入过滤为主。VPK mod 方向仍保留在研究文档中，但纯 VPK 很难直接拦截动态服务器列表数据。
-
